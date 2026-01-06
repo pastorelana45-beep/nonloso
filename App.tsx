@@ -42,7 +42,9 @@ const App: React.FC = () => {
 
   const onInstrumentChange = async (id: string) => {
     setSelectedInstrument(id);
-    await audioEngineRef.current?.loadInstrument(id);
+    if (audioEngineRef.current) {
+      await audioEngineRef.current.loadInstrument(id);
+    }
   };
 
   return (
@@ -54,7 +56,6 @@ const App: React.FC = () => {
           
           <div className="lg:col-span-2 space-y-8">
             <Visualizer 
-              // CORREZIONE ERRORE CONSOLE:
               analyser={audioEngineRef.current && typeof audioEngineRef.current.getAnalyser === 'function' 
                 ? audioEngineRef.current.getAnalyser() : null} 
               isActive={appState !== 'idle'} 
@@ -68,7 +69,7 @@ const App: React.FC = () => {
               {appState === 'recording' && <div className="flex items-center gap-2 text-red-500 text-[10px] font-bold animate-pulse"><Activity size={12}/> REC</div>}
             </div>
 
-            {/* BARRA DI PROGRESSO (Dal video) */}
+            {/* BARRA DI PROGRESSO VIOLA */}
             {playbackProgress > 0 && (
               <div className="space-y-2">
                 <div className="flex justify-between text-[8px] font-black uppercase text-white/40">
@@ -94,7 +95,7 @@ const App: React.FC = () => {
                     </button>
                   </div>
                   
-                  {/* TASTO RIPRODUCI (Dal video) */}
+                  {/* TASTO RIPRODUCI REGISTRAZIONE */}
                   {audioEngineRef.current && audioEngineRef.current.getSequence().length > 0 && (
                     <button 
                       onClick={handlePlay} 
