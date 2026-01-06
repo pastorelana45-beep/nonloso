@@ -1,4 +1,4 @@
-import { SCALES } from '../constants';
+import { SCALES, INSTRUMENTS } from '../constants';
 
 export class AudioEngine {
   private audioContext: AudioContext | null = null;
@@ -15,6 +15,7 @@ export class AudioEngine {
   private octaveShift: number = 0;
   private sensitivity: number = 0.015;
   private isRunning: boolean = false;
+  private currentInstrumentType: OscillatorType = 'sawtooth';
 
   constructor(onMidiNote: (midi: number | null) => void) {
     this.onMidiNote = onMidiNote;
@@ -32,17 +33,27 @@ export class AudioEngine {
   getAnalyser() { return this.analyser; }
   getSequence() { return this.sequence; }
 
+  // Cambia il "timbro" in base allo strumento selezionato
+  async loadInstrument(id: string) {
+    if (id.includes('piano')) this.currentInstrumentType = 'triangle';
+    else if (id.includes('bass')) this.currentInstrumentType = 'sine';
+    else this.currentInstrumentType = 'sawtooth';
+    return true;
+  }
+
   async startMic(mode: 'live' | 'recording') {
     if (!this.audioContext) await this.initAudio();
+    if (this.audioContext?.state === 'suspended') await this.audioContext.resume();
+
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     this.microphone = this.audioContext!.createMediaStreamSource(stream);
     this.microphone.connect(this.analyser!);
     
     this.isRunning = true;
-    this.sequence = []; // Reset sequenza per nuova registrazione
+    if (mode === 'recording') this.sequence = []; 
     
     this.oscillator = this.audioContext!.createOscillator();
-    this.oscillator.type = 'sawtooth';
+    this.oscillator.type = this.currentInstrumentType;
     this.oscillator.connect(this.gainNode!);
     this.oscillator.start();
     
@@ -54,6 +65,8 @@ export class AudioEngine {
     const detect = () => {
       if (!this.isRunning) return;
       this.analyser!.getFloatTimeDomainData(buffer);
+      
+      // Pitch detection logic
       const frequency = this.autoCorrelate(buffer, this.audioContext!.sampleRate);
 
       if (frequency !== -1) {
@@ -64,12 +77,14 @@ export class AudioEngine {
         const freq = 440 * Math.pow(2, (midi - 69) / 12);
         this.oscillator!.frequency.setTargetAtTime(freq, this.audioContext!.currentTime, 0.05);
 
-        // LIVE: senti audio | RECORDING: silenzio (gain 0)
+        // SILENZIOSO in registrazione, ATTIVO in live
         const targetGain = mode === 'live' ? 0.3 : 0;
         this.gainNode!.gain.setTargetAtTime(targetGain, this.audioContext!.currentTime, 0.05);
 
         this.onMidiNote(Math.round(midi));
-        this.sequence.push({ midi: Math.round(midi), time: this.audioContext!.currentTime });
+        if (mode === 'recording') {
+          this.sequence.push({ midi: Math.round(midi), time: this.audioContext!.currentTime });
+        }
       } else {
         this.gainNode!.gain.setTargetAtTime(0, this.audioContext!.currentTime, 0.1);
         this.onMidiNote(null);
@@ -91,25 +106,25 @@ export class AudioEngine {
       
       const osc = this.audioContext!.createOscillator();
       const g = this.audioContext!.createGain();
-      osc.type = 'sawtooth';
+      
+      osc.type = this.currentInstrumentType;
       osc.frequency.setValueAtTime(440 * Math.pow(2, (note.midi - 69) / 12), playTime);
       
       osc.connect(g);
       g.connect(this.audioContext!.destination);
       
       g.gain.setValueAtTime(0, playTime);
-      g.gain.linearRampToValueAtTime(0.2, playTime + 0.02);
-      g.gain.linearRampToValueAtTime(0, playTime + 0.1);
+      g.gain.linearRampToValueAtTime(0.3, playTime + 0.02);
+      g.gain.linearRampToValueAtTime(0, playTime + 0.15);
       
       osc.start(playTime);
-      osc.stop(playTime + 0.12);
+      osc.stop(playTime + 0.2);
 
-      // Aggiorna barra progresso
       setTimeout(() => {
         onProgress((offset / duration) * 100);
-        this.onMidiNote(note.midi); // Illumina tastiera durante play
+        this.onMidiNote(note.midi);
         if (index === this.sequence.length - 1) {
-            setTimeout(() => { onProgress(0); this.onMidiNote(null); }, 200);
+          setTimeout(() => { onProgress(0); this.onMidiNote(null); }, 300);
         }
       }, offset * 1000);
     });
@@ -119,7 +134,7 @@ export class AudioEngine {
     let rms = 0;
     for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
     if (Math.sqrt(rms / buf.length) < this.sensitivity) return -1;
-    // ... (resto dell'algoritmo autoCorrelate come prima)
+
     let c = new Array(buf.length).fill(0);
     for (let i = 0; i < buf.length; i++)
       for (let j = 0; j < buf.length - i; j++)
