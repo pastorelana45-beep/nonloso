@@ -1,0 +1,7 @@
+{
+  "name": "VocalSynth Pro",
+  "description": "Trasforma la tua voce in MIDI con oltre 50 strumenti professionali.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

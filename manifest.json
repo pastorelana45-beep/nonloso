@@ -1,0 +1,20 @@
+
+{
+  "name": "VocalSynth Pro",
+  "short_name": "VocalSynth",
+  "description": "Voice-to-MIDI Workstation Professionale",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0c",
+  "theme_color": "#a855f7",
+  "icons": [
+    {
+      "src": "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?q=80&w=512&auto=format&fit=crop",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
