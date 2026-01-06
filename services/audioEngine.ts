@@ -1,178 +1,157 @@
-import { detectPitch, midiToNoteName } from './pitchDetection';
-import { RecordedNote } from '../types';
+// 1. Import delle costanti (per scale e intervalli)
+import { SCALES, INSTRUMENTS } from '../constants';
+
+// 2. Definizione del tipo per la sequenza di note (opzionale ma consigliato)
+interface MidiEvent {
+  midi: number;
+  time: number;
+}
 
 export class AudioEngine {
-  public audioCtx: AudioContext | null = null;
+  private audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
-  private micStream: MediaStream | null = null;
-  private source: MediaStreamAudioSourceNode | null = null;
-  private instrumentCache: Map<string, any> = new Map();
-  private currentInstrument: any = null;
+  private microphone: MediaStreamAudioSourceNode | null = null;
+  private oscillator: OscillatorNode | null = null;
+  private gainNode: GainNode | null = null;
   
-  private isProcessing = false;
-  private mode: 'live' | 'recording' | 'idle' = 'idle';
-  private sequence: RecordedNote[] = [];
-  private recordingStart: number = 0;
+  private onMidiNote: (midi: number | null) => void;
+  private sequence: MidiEvent[] = [];
   
-  private lastStableMidi: number | null = null;
-  private candidateMidi: number | null = null;
-  private candidateFrames: number = 0;
-  private readonly STABILITY_THRESHOLD = 2; 
-  private readonly MIN_NOTE_TIME = 0.05; 
-  private lastNoteStartTime: number = 0;
-
-  private activeLiveNote: any = null;
+  private isAutotune: boolean = true;
+  private currentScale: number[] = SCALES[0].intervals;
   private octaveShift: number = 0;
   private sensitivity: number = 0.015;
-  
-  private autotuneEnabled: boolean = true;
-  private selectedScaleIntervals: number[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+  private isRunning: boolean = false;
 
-  private onNoteUpdate: (note: number | null, name: string | null) => void;
-
-  constructor(onNoteUpdate: (note: number | null, name: string | null) => void) {
-    this.onNoteUpdate = onNoteUpdate;
+  constructor(onMidiNote: (midi: number | null) => void) {
+    this.onMidiNote = onMidiNote;
   }
 
-  setOctaveShift(shift: number) { this.octaveShift = shift; }
-  setSensitivity(val: number) { this.sensitivity = val; }
-  setAutotune(enabled: boolean) { this.autotuneEnabled = enabled; }
-  setScale(intervals: number[]) { this.selectedScaleIntervals = intervals; }
+  // Inizializza il contesto audio solo dopo un'interazione utente
+  async initAudio() {
+    if (this.audioContext) return;
+    const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+    this.audioContext = new AudioContextClass();
+    
+    this.analyser = this.audioContext.createAnalyser();
+    this.analyser.fftSize = 2048;
 
-  public async initAudio() {
-    if (!this.audioCtx) {
-      this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ 
-        sampleRate: 44100,
-        latencyHint: 'interactive'
-      });
-      this.analyser = this.audioCtx.createAnalyser();
-      this.analyser.fftSize = 2048;
-    }
-    if (this.audioCtx.state === 'suspended') {
-      await this.audioCtx.resume();
-    }
-    return this.audioCtx;
+    this.gainNode = this.audioContext.createGain();
+    this.gainNode.gain.value = 0;
+    this.gainNode.connect(this.audioContext.destination);
   }
 
-  async loadInstrument(instrumentId: string): Promise<boolean> {
-    await this.initAudio();
-    if (this.instrumentCache.has(instrumentId)) {
-      this.currentInstrument = this.instrumentCache.get(instrumentId);
-      return true;
-    }
-    const Soundfont = (window as any).Soundfont;
-    if (!Soundfont) return false;
-    try {
-      const inst = await Soundfont.instrument(this.audioCtx!, instrumentId, { 
-        soundfont: 'FluidR3_GM',
-        format: 'mp3',
-        gain: 2.5,
-        nameToUrl: (name: string, sf: string) => `https://gleitz.github.io/midi-js-soundfonts/${sf}/${name}-mp3.js`
-      });
-      this.instrumentCache.set(instrumentId, inst);
-      this.currentInstrument = inst;
-      return true;
-    } catch (e) {
-      return false;
-    }
+  getAnalyser() {
+    return this.analyser;
+  }
+
+  async loadInstrument(id: string) {
+    const inst = INSTRUMENTS.find(i => i.id === id);
+    console.log("Strumento caricato:", inst?.name);
+    return true;
   }
 
   async startMic(mode: 'live' | 'recording') {
-    const ctx = await this.initAudio();
-    this.mode = mode;
-    this.lastStableMidi = null;
-    this.candidateMidi = null;
-    this.candidateFrames = 0;
-    if (mode === 'recording') this.sequence = [];
+    if (!this.audioContext) await this.initAudio();
+    if (this.audioContext?.state === 'suspended') await this.audioContext.resume();
+
     try {
-      this.micStream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
-      });
-      this.source = ctx.createMediaStreamSource(this.micStream);
-      this.source.connect(this.analyser!);
-      this.recordingStart = ctx.currentTime;
-      this.isProcessing = true;
-      this.process();
-    } catch (e) {
-      this.mode = 'idle';
-      throw e;
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.microphone = this.audioContext!.createMediaStreamSource(stream);
+      this.microphone.connect(this.analyser!);
+      
+      this.isRunning = true;
+      this.startPitchDetection();
+      
+      this.oscillator = this.audioContext!.createOscillator();
+      this.oscillator.type = 'sawtooth';
+      this.oscillator.connect(this.gainNode!);
+      this.oscillator.start();
+    } catch (err) {
+      console.error("Accesso negato al microfono", err);
+      throw err;
     }
   }
 
-  stopMic() {
-    this.isProcessing = false;
-    this.mode = 'idle';
-    if (this.micStream) {
-      this.micStream.getTracks().forEach(track => track.stop());
-      this.micStream = null;
-    }
-    this.stopActiveNote();
-    this.onNoteUpdate(null, null);
-  }
+  private startPitchDetection() {
+    const buffer = new Float32Array(this.analyser!.fftSize);
+    const detect = () => {
+      if (!this.isRunning || !this.analyser || !this.audioContext) return;
+      
+      this.analyser.getFloatTimeDomainData(buffer);
+      const frequency = this.autoCorrelate(buffer, this.audioContext.sampleRate);
 
-  private stopActiveNote() {
-    if (this.activeLiveNote) {
-      try { this.activeLiveNote.stop(this.audioCtx!.currentTime + 0.05); } catch(e) {}
-      this.activeLiveNote = null;
-    }
-  }
-
-  private process = () => {
-    if (!this.isProcessing || !this.analyser || !this.audioCtx) return;
-    const buf = new Float32Array(this.analyser.fftSize);
-    this.analyser.getFloatTimeDomainData(buf);
-    const { pitch, clarity } = detectPitch(buf, this.audioCtx.sampleRate);
-    let sum = 0;
-    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-    const volume = Math.sqrt(sum / buf.length);
-
-    if (pitch > 0 && clarity > 0.8 && volume > this.sensitivity) {
-      let rawMidi = Math.round(12 * Math.log2(pitch / 440) + 69) + (this.octaveShift * 12);
-      let midi = this.autotuneEnabled ? this.snapToScale(rawMidi) : rawMidi;
-      midi = Math.max(0, Math.min(127, midi));
-
-      if (midi !== this.lastStableMidi) {
-        if (midi === this.candidateMidi) {
-          this.candidateFrames++;
-        } else {
-          this.candidateMidi = midi;
-          this.candidateFrames = 0;
-        }
-        if (this.candidateFrames >= this.STABILITY_THRESHOLD) {
-          this.triggerNote(midi);
-          this.lastStableMidi = midi;
-          this.onNoteUpdate(midi, midiToNoteName(midi));
-        }
+      if (frequency !== -1) {
+        let midi = 12 * Math.log2(frequency / 440) + 69;
+        if (this.isAutotune) midi = this.snapToScale(midi);
+        midi += (this.octaveShift * 12);
+        
+        const freq = 440 * Math.pow(2, (midi - 69) / 12);
+        this.oscillator?.frequency.setTargetAtTime(freq, this.audioContext.currentTime, 0.05);
+        this.gainNode?.gain.setTargetAtTime(0.3, this.audioContext.currentTime, 0.05);
+        
+        this.onMidiNote(Math.round(midi));
+        this.sequence.push({ midi: Math.round(midi), time: this.audioContext.currentTime });
+      } else {
+        this.gainNode?.gain.setTargetAtTime(0, this.audioContext.currentTime, 0.1);
+        this.onMidiNote(null);
       }
-    } else {
-      if (this.lastStableMidi !== null) {
-        this.stopActiveNote();
-        this.lastStableMidi = null;
-        this.onNoteUpdate(null, null);
-      }
-    }
-    if (this.isProcessing) requestAnimationFrame(this.process);
+      requestAnimationFrame(detect);
+    };
+    detect();
+  }
+
+  private autoCorrelate(buf: Float32Array, sampleRate: number) {
+    let SIZE = buf.length;
+    let rms = 0;
+    for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
+    rms = Math.sqrt(rms / SIZE);
+    if (rms < this.sensitivity) return -1;
+
+    let r1 = 0, r2 = SIZE - 1, thres = 0.2;
+    for (let i = 0; i < SIZE / 2; i++) if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+    for (let i = 1; i < SIZE / 2; i++) if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+    buf = buf.slice(r1, r2);
+    SIZE = buf.length;
+
+    let c = new Array(SIZE).fill(0);
+    for (let i = 0; i < SIZE; i++)
+      for (let j = 0; j < SIZE - i; j++)
+        c[i] = c[i] + buf[j] * buf[j + i];
+
+    let d = 0; while (c[d] > c[d + 1]) d++;
+    let maxval = -1, maxpos = -1;
+    for (let i = d; i < SIZE; i++) if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
+    return sampleRate / maxpos;
   }
 
   private snapToScale(midi: number): number {
-    const octave = Math.floor(midi / 12);
-    const noteInOctave = midi % 12;
-    let closest = this.selectedScaleIntervals[0];
-    let minDiff = 12;
-    for (const interval of this.selectedScaleIntervals) {
-      const diff = Math.abs(interval - noteInOctave);
-      if (diff < minDiff) { minDiff = diff; closest = interval; }
+    const note = Math.round(midi) % 12;
+    const octave = Math.floor(Math.round(midi) / 12);
+    let closest = this.currentScale[0];
+    let minDiff = Math.abs(note - closest);
+    for (const interval of this.currentScale) {
+      if (Math.abs(note - interval) < minDiff) {
+        minDiff = Math.abs(note - interval);
+        closest = interval;
+      }
     }
     return (octave * 12) + closest;
   }
 
-  private triggerNote(midi: number) {
-    if (this.currentInstrument && this.audioCtx) {
-      if (this.mode === 'live') {
-        const prev = this.activeLiveNote;
-        this.activeLiveNote = this.currentInstrument.play(midi, this.audioCtx.currentTime, { gain: 1.0 });
-        if (prev) prev.stop(this.audioCtx.currentTime + 0.02);
-      }
-    }
+  stopMic() {
+    this.isRunning = false;
+    this.oscillator?.stop();
+    this.oscillator?.disconnect();
+    this.microphone?.disconnect();
+    if (this.gainNode) this.gainNode.gain.value = 0;
+    this.onMidiNote(null);
   }
+
+  setAutotune(enabled: boolean) { this.isAutotune = enabled; }
+  setScale(intervals: number[]) { this.currentScale = intervals; }
+  setSensitivity(val: number) { this.sensitivity = val; }
+  setOctaveShift(val: number) { this.octaveShift = val; }
+  getSequence() { return this.sequence; }
+  previewSequence() { console.log("Riproduzione non implementata"); }
 }
