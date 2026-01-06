@@ -1,6 +1,6 @@
-
-import { detectPitch, midiToNoteName } from './pitchDetection.ts';
-import { RecordedNote } from '../types.ts';
+// Correzione: rimosso .ts e assicurati che il nome file sia identico (case-sensitive)
+import { detectPitch, midiToNoteName } from './pitchDetection'; 
+import { RecordedNote } from '../types';
 
 export class AudioEngine {
   public audioCtx: AudioContext | null = null;
@@ -151,12 +151,10 @@ export class AudioEngine {
     for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
     const volume = Math.sqrt(sum / buf.length);
 
-    // Solo se il pitch è chiaro e il volume supera la soglia del gate
     if (pitch > 0 && clarity > 0.8 && volume > this.sensitivity) {
       let rawMidi = Math.round(12 * Math.log2(pitch / 440) + 69) + (this.octaveShift * 12);
       let midi = rawMidi;
 
-      // Autotune: Forza la nota sulla scala scelta
       if (this.autotuneEnabled) {
         midi = this.snapToScale(rawMidi);
       }
