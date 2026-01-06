@@ -26,22 +26,28 @@ export class AudioEngine {
     const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
     this.audioContext = new AudioContextClass();
     this.analyser = this.audioContext.createAnalyser();
+    this.analyser.fftSize = 2048;
     this.gainNode = this.audioContext.createGain();
     this.gainNode.connect(this.audioContext.destination);
   }
 
-  getAnalyser() { return this.analyser; }
-  getSequence() { return this.sequence; }
+  // Risolve l'errore "getAnalyser is not a function"
+  getAnalyser() {
+    return this.analyser;
+  }
 
+  getSequence() {
+    return this.sequence;
+  }
+
+  // Cambia il timbro in base allo strumento (Piano = dolce, Synth = dente di sega)
   async loadInstrument(id: string) {
-    // Mapping reale degli strumenti per cambiare il suono
-    if (id.includes('piano')) this.currentInstrumentType = 'triangle';
-    else if (id.includes('bass')) this.currentInstrumentType = 'sine';
-    else if (id.includes('keys') || id.includes('lead')) this.currentInstrumentType = 'square';
-    else this.currentInstrumentType = 'sawtooth';
-
-    if (this.oscillator && this.isRunning) {
-      this.oscillator.type = this.currentInstrumentType;
+    if (id.toLowerCase().includes('piano')) {
+      this.currentInstrumentType = 'triangle';
+    } else if (id.toLowerCase().includes('bass')) {
+      this.currentInstrumentType = 'sine';
+    } else {
+      this.currentInstrumentType = 'sawtooth';
     }
     return true;
   }
@@ -56,7 +62,7 @@ export class AudioEngine {
     
     this.isRunning = true;
     if (mode === 'recording') this.sequence = []; 
-    
+
     this.oscillator = this.audioContext!.createOscillator();
     this.oscillator.type = this.currentInstrumentType;
     this.oscillator.connect(this.gainNode!);
@@ -68,8 +74,8 @@ export class AudioEngine {
   private startPitchDetection(mode: 'live' | 'recording') {
     const buffer = new Float32Array(this.analyser!.fftSize);
     const detect = () => {
-      if (!this.isRunning) return;
-      this.analyser!.getFloatTimeDomainData(buffer);
+      if (!this.isRunning || !this.analyser) return;
+      this.analyser.getFloatTimeDomainData(buffer);
       const frequency = this.autoCorrelate(buffer, this.audioContext!.sampleRate);
 
       if (frequency !== -1) {
@@ -80,7 +86,7 @@ export class AudioEngine {
         const freq = 440 * Math.pow(2, (midi - 69) / 12);
         this.oscillator!.frequency.setTargetAtTime(freq, this.audioContext!.currentTime, 0.05);
 
-        // VOLUME: 0.3 per Live, 0 (Muto) per Recording
+        // MODALITÀ: Live = Senti audio | Recording = Silenzio (Mute)
         const targetGain = mode === 'live' ? 0.3 : 0;
         this.gainNode!.gain.setTargetAtTime(targetGain, this.audioContext!.currentTime, 0.05);
 
@@ -137,6 +143,7 @@ export class AudioEngine {
     let rms = 0;
     for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
     if (Math.sqrt(rms / buf.length) < this.sensitivity) return -1;
+
     let c = new Array(buf.length).fill(0);
     for (let i = 0; i < buf.length; i++)
       for (let j = 0; j < buf.length - i; j++)
@@ -162,7 +169,7 @@ export class AudioEngine {
     this.isRunning = false;
     this.oscillator?.stop();
     this.microphone?.disconnect();
-    this.gainNode!.gain.value = 0;
+    if (this.gainNode) this.gainNode.gain.value = 0;
     this.onMidiNote(null);
   }
 
