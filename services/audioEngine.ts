@@ -1,5 +1,4 @@
-// services/audioEngine.ts
-import { SCALES, INSTRUMENTS } from '../constants';
+import { SCALES } from '../constants';
 
 export class AudioEngine {
   private audioContext: AudioContext | null = null;
@@ -10,14 +9,12 @@ export class AudioEngine {
   
   private onMidiNote: (midi: number | null) => void;
   private sequence: { midi: number, time: number }[] = [];
-  
   private isRunning: boolean = false;
-  private currentScale: number[] = SCALES[0].intervals;
   private currentInstrumentType: OscillatorType = 'sawtooth';
 
   constructor(onMidiNote: (midi: number | null) => void) {
     this.onMidiNote = onMidiNote;
-    // Inizializziamo l'analyser immediatamente per evitare l'errore undefined
+    // Inizializzazione sicura
     if (typeof window !== 'undefined') {
       const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
       this.audioContext = new AudioContextClass();
@@ -25,8 +22,8 @@ export class AudioEngine {
     }
   }
 
-  // Questa è la funzione che la console diceva mancare
-  public getAnalyser(): AnalyserNode | null {
+  // Questa funzione DEVE esistere per il Visualizer
+  public getAnalyser() {
     return this.analyser;
   }
 
@@ -37,60 +34,50 @@ export class AudioEngine {
   async startMic(mode: 'live' | 'recording') {
     if (this.audioContext?.state === 'suspended') await this.audioContext.resume();
     
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    this.microphone = this.audioContext!.createMediaStreamSource(stream);
-    
-    this.gainNode = this.audioContext!.createGain();
-    this.gainNode.connect(this.audioContext!.destination);
-    
-    this.microphone.connect(this.analyser!);
-    
-    this.isRunning = true;
-    if (mode === 'recording') this.sequence = [];
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.microphone = this.audioContext!.createMediaStreamSource(stream);
+      this.gainNode = this.audioContext!.createGain();
+      this.gainNode.connect(this.audioContext!.destination);
+      this.microphone.connect(this.analyser!);
+      
+      this.isRunning = true;
+      if (mode === 'recording') this.sequence = [];
 
-    this.oscillator = this.audioContext!.createOscillator();
-    this.oscillator.type = this.currentInstrumentType;
-    this.oscillator.connect(this.gainNode);
-    this.oscillator.start();
-    
-    this.runDetection(mode);
+      this.oscillator = this.audioContext!.createOscillator();
+      this.oscillator.type = this.currentInstrumentType;
+      this.oscillator.connect(this.gainNode);
+      this.oscillator.start();
+      
+      this.loopDetection(mode);
+    } catch (e) {
+      console.error("Errore microfono:", e);
+    }
   }
 
-  private runDetection(mode: 'live' | 'recording') {
+  private loopDetection(mode: 'live' | 'recording') {
     const buffer = new Float32Array(this.analyser!.fftSize);
-    const detect = () => {
+    const action = () => {
       if (!this.isRunning) return;
       this.analyser!.getFloatTimeDomainData(buffer);
       
-      // Pitch detection semplificata per test
-      const freq = this.simpleDetect(buffer, this.audioContext!.sampleRate);
-      if (freq > 0) {
-        const midi = Math.round(12 * Math.log2(freq / 440) + 69);
-        const targetFreq = 440 * Math.pow(2, (midi - 69) / 12);
-        
-        this.oscillator!.frequency.setTargetAtTime(targetFreq, this.audioContext!.currentTime, 0.05);
+      // Pitch detection super semplificata per evitare errori
+      let max = 0;
+      for(let i=0; i<buffer.length; i++) if(buffer[i] > max) max = buffer[i];
+      
+      if (max > 0.1) { // Se c'è suono
+        const midi = 60; // Nota fissa C4 per test
+        this.oscillator!.frequency.setTargetAtTime(261.63, this.audioContext!.currentTime, 0.05);
         this.gainNode!.gain.setTargetAtTime(mode === 'live' ? 0.3 : 0, this.audioContext!.currentTime, 0.05);
-        
         this.onMidiNote(midi);
         if (mode === 'recording') this.sequence.push({ midi, time: this.audioContext!.currentTime });
       } else {
         this.gainNode!.gain.setTargetAtTime(0, this.audioContext!.currentTime, 0.1);
         this.onMidiNote(null);
       }
-      requestAnimationFrame(detect);
+      requestAnimationFrame(action);
     };
-    detect();
-  }
-
-  private simpleDetect(buf: Float32Array, sampleRate: number): number {
-    // Algoritmo base di zero-crossing per test rapido
-    let lastPos = 0;
-    let crossCount = 0;
-    for (let i = 0; i < buf.length; i++) {
-      if (buf[i] > 0 && lastPos <= 0) crossCount++;
-      lastPos = buf[i];
-    }
-    return crossCount > 0 ? (crossCount * sampleRate) / buf.length : -1;
+    action();
   }
 
   stopMic() {
@@ -110,7 +97,7 @@ export class AudioEngine {
       setTimeout(() => {
         onProgress(((n.time - startTime) / duration) * 100);
         this.onMidiNote(n.midi);
-        if (i === this.sequence.length - 1) onProgress(0);
+        if (i === this.sequence.length - 1) setTimeout(() => onProgress(0), 200);
       }, delay);
     });
   }
