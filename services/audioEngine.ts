@@ -33,10 +33,11 @@ export class AudioEngine {
   getAnalyser() { return this.analyser; }
   getSequence() { return this.sequence; }
 
-  // Cambia il "timbro" in base allo strumento selezionato
+  // Cambia il timbro in base allo strumento selezionato
   async loadInstrument(id: string) {
     if (id.includes('piano')) this.currentInstrumentType = 'triangle';
     else if (id.includes('bass')) this.currentInstrumentType = 'sine';
+    else if (id.includes('keys')) this.currentInstrumentType = 'square';
     else this.currentInstrumentType = 'sawtooth';
     return true;
   }
@@ -66,7 +67,6 @@ export class AudioEngine {
       if (!this.isRunning) return;
       this.analyser!.getFloatTimeDomainData(buffer);
       
-      // Pitch detection logic
       const frequency = this.autoCorrelate(buffer, this.audioContext!.sampleRate);
 
       if (frequency !== -1) {
@@ -77,7 +77,7 @@ export class AudioEngine {
         const freq = 440 * Math.pow(2, (midi - 69) / 12);
         this.oscillator!.frequency.setTargetAtTime(freq, this.audioContext!.currentTime, 0.05);
 
-        // SILENZIOSO in registrazione, ATTIVO in live
+        // SILENZIOSO in registrazione per evitare feedback, ATTIVO in live
         const targetGain = mode === 'live' ? 0.3 : 0;
         this.gainNode!.gain.setTargetAtTime(targetGain, this.audioContext!.currentTime, 0.05);
 
