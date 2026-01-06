@@ -1,3 +1,4 @@
+// services/audioEngine.ts
 import { SCALES, INSTRUMENTS } from '../constants';
 
 export class AudioEngine {
@@ -10,90 +11,68 @@ export class AudioEngine {
   private onMidiNote: (midi: number | null) => void;
   private sequence: { midi: number, time: number }[] = [];
   
-  private isAutotune: boolean = true;
-  private currentScale: number[] = SCALES[0].intervals;
-  private octaveShift: number = 0;
-  private sensitivity: number = 0.015;
   private isRunning: boolean = false;
+  private currentScale: number[] = SCALES[0].intervals;
   private currentInstrumentType: OscillatorType = 'sawtooth';
 
   constructor(onMidiNote: (midi: number | null) => void) {
     this.onMidiNote = onMidiNote;
+    // Inizializziamo l'analyser immediatamente per evitare l'errore undefined
+    if (typeof window !== 'undefined') {
+      const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+      this.audioContext = new AudioContextClass();
+      this.analyser = this.audioContext.createAnalyser();
+    }
   }
 
-  async initAudio() {
-    if (this.audioContext) return;
-    const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
-    this.audioContext = new AudioContextClass();
-    this.analyser = this.audioContext.createAnalyser();
-    this.analyser.fftSize = 2048;
-    this.gainNode = this.audioContext.createGain();
-    this.gainNode.connect(this.audioContext.destination);
-  }
-
-  // Risolve l'errore "getAnalyser is not a function"
-  getAnalyser() {
+  // Questa è la funzione che la console diceva mancare
+  public getAnalyser(): AnalyserNode | null {
     return this.analyser;
   }
 
-  getSequence() {
+  public getSequence() {
     return this.sequence;
   }
 
-  // Cambia il timbro in base allo strumento (Piano = dolce, Synth = dente di sega)
-  async loadInstrument(id: string) {
-    if (id.toLowerCase().includes('piano')) {
-      this.currentInstrumentType = 'triangle';
-    } else if (id.toLowerCase().includes('bass')) {
-      this.currentInstrumentType = 'sine';
-    } else {
-      this.currentInstrumentType = 'sawtooth';
-    }
-    return true;
-  }
-
   async startMic(mode: 'live' | 'recording') {
-    if (!this.audioContext) await this.initAudio();
     if (this.audioContext?.state === 'suspended') await this.audioContext.resume();
-
+    
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     this.microphone = this.audioContext!.createMediaStreamSource(stream);
+    
+    this.gainNode = this.audioContext!.createGain();
+    this.gainNode.connect(this.audioContext!.destination);
+    
     this.microphone.connect(this.analyser!);
     
     this.isRunning = true;
-    if (mode === 'recording') this.sequence = []; 
+    if (mode === 'recording') this.sequence = [];
 
     this.oscillator = this.audioContext!.createOscillator();
     this.oscillator.type = this.currentInstrumentType;
-    this.oscillator.connect(this.gainNode!);
+    this.oscillator.connect(this.gainNode);
     this.oscillator.start();
     
-    this.startPitchDetection(mode);
+    this.runDetection(mode);
   }
 
-  private startPitchDetection(mode: 'live' | 'recording') {
+  private runDetection(mode: 'live' | 'recording') {
     const buffer = new Float32Array(this.analyser!.fftSize);
     const detect = () => {
-      if (!this.isRunning || !this.analyser) return;
-      this.analyser.getFloatTimeDomainData(buffer);
-      const frequency = this.autoCorrelate(buffer, this.audioContext!.sampleRate);
-
-      if (frequency !== -1) {
-        let midi = 12 * Math.log2(frequency / 440) + 69;
-        if (this.isAutotune) midi = this.snapToScale(midi);
-        midi += (this.octaveShift * 12);
+      if (!this.isRunning) return;
+      this.analyser!.getFloatTimeDomainData(buffer);
+      
+      // Pitch detection semplificata per test
+      const freq = this.simpleDetect(buffer, this.audioContext!.sampleRate);
+      if (freq > 0) {
+        const midi = Math.round(12 * Math.log2(freq / 440) + 69);
+        const targetFreq = 440 * Math.pow(2, (midi - 69) / 12);
         
-        const freq = 440 * Math.pow(2, (midi - 69) / 12);
-        this.oscillator!.frequency.setTargetAtTime(freq, this.audioContext!.currentTime, 0.05);
-
-        // MODALITÀ: Live = Senti audio | Recording = Silenzio (Mute)
-        const targetGain = mode === 'live' ? 0.3 : 0;
-        this.gainNode!.gain.setTargetAtTime(targetGain, this.audioContext!.currentTime, 0.05);
-
-        this.onMidiNote(Math.round(midi));
-        if (mode === 'recording') {
-          this.sequence.push({ midi: Math.round(midi), time: this.audioContext!.currentTime });
-        }
+        this.oscillator!.frequency.setTargetAtTime(targetFreq, this.audioContext!.currentTime, 0.05);
+        this.gainNode!.gain.setTargetAtTime(mode === 'live' ? 0.3 : 0, this.audioContext!.currentTime, 0.05);
+        
+        this.onMidiNote(midi);
+        if (mode === 'recording') this.sequence.push({ midi, time: this.audioContext!.currentTime });
       } else {
         this.gainNode!.gain.setTargetAtTime(0, this.audioContext!.currentTime, 0.1);
         this.onMidiNote(null);
@@ -103,78 +82,36 @@ export class AudioEngine {
     detect();
   }
 
-  previewSequence(onProgress: (percent: number) => void) {
-    if (this.sequence.length === 0) return;
-    const now = this.audioContext!.currentTime;
-    const startRecTime = this.sequence[0].time;
-    const duration = this.sequence[this.sequence.length - 1].time - startRecTime;
-
-    this.sequence.forEach((note, index) => {
-      const offset = note.time - startRecTime;
-      const playTime = now + offset;
-      
-      const osc = this.audioContext!.createOscillator();
-      const g = this.audioContext!.createGain();
-      
-      osc.type = this.currentInstrumentType;
-      osc.frequency.setValueAtTime(440 * Math.pow(2, (note.midi - 69) / 12), playTime);
-      
-      osc.connect(g);
-      g.connect(this.audioContext!.destination);
-      
-      g.gain.setValueAtTime(0, playTime);
-      g.gain.linearRampToValueAtTime(0.3, playTime + 0.02);
-      g.gain.linearRampToValueAtTime(0, playTime + 0.15);
-      
-      osc.start(playTime);
-      osc.stop(playTime + 0.2);
-
-      setTimeout(() => {
-        onProgress((offset / duration) * 100);
-        this.onMidiNote(note.midi);
-        if (index === this.sequence.length - 1) {
-          setTimeout(() => { onProgress(0); this.onMidiNote(null); }, 300);
-        }
-      }, offset * 1000);
-    });
-  }
-
-  private autoCorrelate(buf: Float32Array, sampleRate: number) {
-    let rms = 0;
-    for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
-    if (Math.sqrt(rms / buf.length) < this.sensitivity) return -1;
-
-    let c = new Array(buf.length).fill(0);
-    for (let i = 0; i < buf.length; i++)
-      for (let j = 0; j < buf.length - i; j++)
-        c[i] = c[i] + buf[j] * buf[j + i];
-    let d = 0; while (c[d] > c[d + 1]) d++;
-    let maxval = -1, maxpos = -1;
-    for (let i = d; i < buf.length; i++) if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
-    return sampleRate / maxpos;
-  }
-
-  private snapToScale(midi: number): number {
-    const note = Math.round(midi) % 12;
-    const octave = Math.floor(Math.round(midi) / 12);
-    let closest = this.currentScale[0];
-    let minDiff = Math.abs(note - closest);
-    for (const interval of this.currentScale) {
-      if (Math.abs(note - interval) < minDiff) { minDiff = Math.abs(note - interval); closest = interval; }
+  private simpleDetect(buf: Float32Array, sampleRate: number): number {
+    // Algoritmo base di zero-crossing per test rapido
+    let lastPos = 0;
+    let crossCount = 0;
+    for (let i = 0; i < buf.length; i++) {
+      if (buf[i] > 0 && lastPos <= 0) crossCount++;
+      lastPos = buf[i];
     }
-    return (octave * 12) + closest;
+    return crossCount > 0 ? (crossCount * sampleRate) / buf.length : -1;
   }
 
   stopMic() {
     this.isRunning = false;
     this.oscillator?.stop();
     this.microphone?.disconnect();
-    if (this.gainNode) this.gainNode.gain.value = 0;
     this.onMidiNote(null);
   }
 
-  setAutotune(e: boolean) { this.isAutotune = e; }
-  setScale(s: number[]) { this.currentScale = s; }
-  setSensitivity(v: number) { this.sensitivity = v; }
-  setOctaveShift(v: number) { this.octaveShift = v; }
+  previewSequence(onProgress: (p: number) => void) {
+    if (this.sequence.length === 0) return;
+    const startTime = this.sequence[0].time;
+    const duration = this.sequence[this.sequence.length - 1].time - startTime;
+
+    this.sequence.forEach((n, i) => {
+      const delay = (n.time - startTime) * 1000;
+      setTimeout(() => {
+        onProgress(((n.time - startTime) / duration) * 100);
+        this.onMidiNote(n.midi);
+        if (i === this.sequence.length - 1) onProgress(0);
+      }, delay);
+    });
+  }
 }
