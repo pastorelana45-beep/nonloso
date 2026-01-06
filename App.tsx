@@ -42,13 +42,11 @@ const App: React.FC = () => {
 
   const onInstrumentChange = async (id: string) => {
     setSelectedInstrument(id);
-    if (audioEngineRef.current) {
-      await audioEngineRef.current.loadInstrument(id);
-    }
+    await audioEngineRef.current?.loadInstrument(id);
   };
 
   return (
-    <div className="min-h-screen bg-[#050507] text-white flex flex-col font-sans">
+    <div className="min-h-screen bg-[#050507] text-white flex flex-col">
       <Header onGeneratePromo={() => {}} />
       
       <main className="flex-1 max-w-7xl mx-auto w-full p-6 lg:p-12 space-y-12">
@@ -63,13 +61,13 @@ const App: React.FC = () => {
             <MidiKeyboard activeMidi={activeMidi} activeColor="text-purple-500" />
           </div>
 
-          <div className="bg-white/5 border border-white/10 p-8 rounded-[2.5rem] space-y-8 h-fit backdrop-blur-md">
+          <div className="bg-white/5 border border-white/10 p-8 rounded-[2.5rem] space-y-8 backdrop-blur-md h-fit">
             <div className="flex items-center justify-between">
               <h3 className="text-[10px] font-black uppercase tracking-widest text-purple-400">Workstation</h3>
               {appState === 'recording' && <div className="flex items-center gap-2 text-red-500 text-[10px] font-bold animate-pulse"><Activity size={12}/> REC</div>}
             </div>
 
-            {/* BARRA DI PROGRESSO VIOLA */}
+            {/* BARRA PROGRESSO (come nel video) */}
             {playbackProgress > 0 && (
               <div className="space-y-2">
                 <div className="flex justify-between text-[8px] font-black uppercase text-white/40">
@@ -77,10 +75,7 @@ const App: React.FC = () => {
                   <span>{Math.round(playbackProgress)}%</span>
                 </div>
                 <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-purple-500 transition-all duration-100 ease-linear" 
-                    style={{ width: `${playbackProgress}%` }}
-                  />
+                  <div className="h-full bg-purple-500 transition-all duration-100 ease-linear" style={{ width: `${playbackProgress}%` }} />
                 </div>
               </div>
             )}
@@ -89,18 +84,14 @@ const App: React.FC = () => {
               {appState === 'idle' ? (
                 <div className="space-y-3">
                   <div className="flex gap-3">
-                    <button onClick={handleStartLive} className="flex-1 py-4 bg-white text-black rounded-2xl font-black text-[11px] uppercase transition-all active:scale-95">Live</button>
-                    <button onClick={handleStartRecording} className="flex-1 py-4 bg-purple-600 text-white rounded-2xl font-black text-[11px] uppercase flex items-center justify-center gap-2 transition-all active:scale-95">
+                    <button onClick={handleStartLive} className="flex-1 py-4 bg-white text-black rounded-2xl font-black text-[11px] uppercase active:scale-95 transition-transform">Live</button>
+                    <button onClick={handleStartRecording} className="flex-1 py-4 bg-purple-600 text-white rounded-2xl font-black text-[11px] uppercase flex items-center justify-center gap-2 active:scale-95 transition-transform">
                       <Mic size={14} /> Record
                     </button>
                   </div>
                   
-                  {/* TASTO RIPRODUCI REGISTRAZIONE */}
                   {audioEngineRef.current && audioEngineRef.current.getSequence().length > 0 && (
-                    <button 
-                      onClick={handlePlay} 
-                      className="w-full py-4 border border-white/10 text-white rounded-2xl font-black text-[11px] uppercase flex items-center justify-center gap-2 hover:bg-white/5 transition-colors"
-                    >
+                    <button onClick={handlePlay} className="w-full py-4 border border-white/10 text-white rounded-2xl font-black text-[11px] uppercase flex items-center justify-center gap-2 hover:bg-white/5 transition-colors">
                       <Play size={14} fill="currentColor" /> Riproduci Registrazione
                     </button>
                   )}
@@ -114,11 +105,7 @@ const App: React.FC = () => {
           </div>
         </div>
         
-        <InstrumentGrid 
-          selectedId={selectedInstrument} 
-          onSelect={onInstrumentChange} 
-          isLoading={false} 
-        />
+        <InstrumentGrid selectedId={selectedInstrument} onSelect={onInstrumentChange} isLoading={false} />
       </main>
     </div>
   );
