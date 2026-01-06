@@ -5,7 +5,7 @@ import { InstrumentGrid } from './components/InstrumentGrid';
 import { MidiKeyboard } from './components/MidiKeyboard';
 import { AudioEngine } from './services/audioEngine';
 import { INSTRUMENTS, SCALES } from './constants';
-import { Play, Square, Mic, Volume2, Activity } from 'lucide-react';
+import { Play, Square, Mic, Activity } from 'lucide-react';
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<'idle' | 'recording' | 'live'>('idle');
@@ -54,7 +54,9 @@ const App: React.FC = () => {
           
           <div className="lg:col-span-2 space-y-8">
             <Visualizer 
-              analyser={audioEngineRef.current?.getAnalyser() || null} 
+              // CORREZIONE ERRORE CONSOLE:
+              analyser={audioEngineRef.current && typeof audioEngineRef.current.getAnalyser === 'function' 
+                ? audioEngineRef.current.getAnalyser() : null} 
               isActive={appState !== 'idle'} 
             />
             <MidiKeyboard activeMidi={activeMidi} activeColor="text-purple-500" />
@@ -62,13 +64,17 @@ const App: React.FC = () => {
 
           <div className="bg-white/5 border border-white/10 p-8 rounded-[2.5rem] space-y-8 h-fit backdrop-blur-md">
             <div className="flex items-center justify-between">
-              <h3 className="text-[10px] font-black uppercase tracking-widest text-purple-400">Control Panel</h3>
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-purple-400">Workstation</h3>
               {appState === 'recording' && <div className="flex items-center gap-2 text-red-500 text-[10px] font-bold animate-pulse"><Activity size={12}/> REC</div>}
             </div>
 
-            {/* BARRA DI PROGRESSO */}
+            {/* BARRA DI PROGRESSO (Dal video) */}
             {playbackProgress > 0 && (
               <div className="space-y-2">
+                <div className="flex justify-between text-[8px] font-black uppercase text-white/40">
+                  <span>Playback</span>
+                  <span>{Math.round(playbackProgress)}%</span>
+                </div>
                 <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
                   <div 
                     className="h-full bg-purple-500 transition-all duration-100 ease-linear" 
@@ -82,25 +88,25 @@ const App: React.FC = () => {
               {appState === 'idle' ? (
                 <div className="space-y-3">
                   <div className="flex gap-3">
-                    <button onClick={handleStartLive} className="flex-1 py-4 bg-white text-black rounded-2xl font-black text-[11px] uppercase hover:scale-[1.02] transition-transform">Live Mode</button>
-                    <button onClick={handleStartRecording} className="flex-1 py-4 bg-purple-600 text-white rounded-2xl font-black text-[11px] uppercase flex items-center justify-center gap-2 hover:bg-purple-500 transition-colors">
+                    <button onClick={handleStartLive} className="flex-1 py-4 bg-white text-black rounded-2xl font-black text-[11px] uppercase transition-all active:scale-95">Live</button>
+                    <button onClick={handleStartRecording} className="flex-1 py-4 bg-purple-600 text-white rounded-2xl font-black text-[11px] uppercase flex items-center justify-center gap-2 transition-all active:scale-95">
                       <Mic size={14} /> Record
                     </button>
                   </div>
                   
-                  {/* BOTTONE PLAY DOPO REGISTRAZIONE */}
+                  {/* TASTO RIPRODUCI (Dal video) */}
                   {audioEngineRef.current && audioEngineRef.current.getSequence().length > 0 && (
                     <button 
                       onClick={handlePlay} 
-                      className="w-full py-4 border border-purple-500/30 text-purple-400 rounded-2xl font-black text-[11px] uppercase flex items-center justify-center gap-2 hover:bg-purple-500/10 transition-colors"
+                      className="w-full py-4 border border-white/10 text-white rounded-2xl font-black text-[11px] uppercase flex items-center justify-center gap-2 hover:bg-white/5 transition-colors"
                     >
-                      <Play size={14} fill="currentColor" /> Play Recording
+                      <Play size={14} fill="currentColor" /> Riproduci Registrazione
                     </button>
                   )}
                 </div>
               ) : (
                 <button onClick={handleStop} className="w-full py-4 bg-red-600 rounded-2xl font-black text-[11px] uppercase flex items-center justify-center gap-2 animate-pulse">
-                  <Square size={14} fill="currentColor" /> Stop Engine
+                  <Square size={14} fill="currentColor" /> Stop
                 </button>
               )}
             </div>
