@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-// Rimosse le estensioni .tsx e .ts dagli import
 import { Header } from './components/Header';
 import { Visualizer } from './components/Visualizer';
 import { InstrumentGrid } from './components/InstrumentGrid';
@@ -12,7 +11,6 @@ import {
 } from 'lucide-react';
 
 const App: React.FC = () => {
-  // Gestione sicura degli indici iniziali
   const [appState, setAppState] = useState<'idle' | 'recording' | 'live'>('idle');
   const [selectedInstrument, setSelectedInstrument] = useState(INSTRUMENTS?.[0]?.id || '');
   const [activeMidi, setActiveMidi] = useState<number | null>(null);
@@ -27,15 +25,8 @@ const App: React.FC = () => {
   const audioEngineRef = useRef<AudioEngine | null>(null);
 
   useEffect(() => {
-    // Inizializzazione protetta dell'engine
-    try {
-      const engine = new AudioEngine((midi) => setActiveMidi(midi));
-      audioEngineRef.current = engine;
-    } catch (err) {
-      console.error("AudioEngine failed to initialize", err);
-      setError("Impossibile inizializzare il motore audio.");
-    }
-
+    const engine = new AudioEngine((midi) => setActiveMidi(midi));
+    audioEngineRef.current = engine;
     return () => {
       audioEngineRef.current?.stopMic();
     };
@@ -113,7 +104,7 @@ const App: React.FC = () => {
       
       <main className="flex-1 max-w-7xl mx-auto w-full p-6 lg:p-12 space-y-12">
         {error && (
-          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3 text-red-400 text-xs font-bold uppercase tracking-widest animate-pulse">
+          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3 text-red-400 text-xs font-bold">
             <AlertCircle className="w-5 h-5" /> {error}
           </div>
         )}
@@ -121,7 +112,10 @@ const App: React.FC = () => {
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-12">
           <div className="xl:col-span-2 space-y-8">
             <Visualizer 
-              analyser={audioEngineRef.current?.getAnalyser() || null} 
+              // PROTEZIONE CONTRO IL CRASH:
+              analyser={audioEngineRef.current && typeof audioEngineRef.current.getAnalyser === 'function' 
+                ? audioEngineRef.current.getAnalyser() 
+                : null} 
               isActive={appState !== 'idle'} 
               activeColor="text-purple-500"
             />
@@ -132,115 +126,63 @@ const App: React.FC = () => {
             />
           </div>
 
-          <div className="glass p-8 rounded-[3rem] border border-white/5 space-y-8 h-fit sticky top-32 shadow-2xl bg-white/5">
-            <div className="flex items-center justify-between">
-              <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-white/30">Control Center</h3>
-              <Settings className="w-4 h-4 text-white/10" />
-            </div>
+          <div className="glass p-8 rounded-[3rem] border border-white/5 space-y-8 h-fit bg-white/5 shadow-2xl">
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-white/30">Control Center</h3>
 
-            {/* Sensibilità */}
-            <div className="space-y-3">
-              <div className="flex justify-between items-end">
-                <label className="text-[8px] font-black uppercase tracking-widest text-white/40">Pitch Sensitivity</label>
-                <span className="text-[10px] font-mono text-purple-400">{(sensitivity * 1000).toFixed(0)}ms</span>
+            <div className="space-y-6">
+              {/* Sensitivity */}
+              <div className="space-y-3">
+                <label className="text-[8px] font-black uppercase text-white/40">Pitch Sensitivity</label>
+                <input 
+                  type="range" min="0.005" max="0.05" step="0.001" 
+                  value={sensitivity}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    setSensitivity(v);
+                    audioEngineRef.current?.setSensitivity(v);
+                  }}
+                  className="w-full h-1 bg-white/10 rounded-full appearance-none accent-purple-500" 
+                />
               </div>
-              <input 
-                type="range" min="0.005" max="0.05" step="0.001" 
-                value={sensitivity}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value);
-                  setSensitivity(v);
-                  audioEngineRef.current?.setSensitivity(v);
-                }}
-                className="w-full h-1 bg-white/5 rounded-full appearance-none cursor-pointer accent-purple-500" 
-              />
-            </div>
 
-            {/* Octave Shift */}
-            <div className="space-y-3">
-              <label className="text-[8px] font-black uppercase tracking-widest text-white/40">Octave Shift</label>
-              <div className="flex gap-2">
-                {[-2, -1, 0, 1, 2].map(o => (
-                  <button 
-                    key={o}
-                    onClick={() => {
-                      setOctaveShift(o);
-                      audioEngineRef.current?.setOctaveShift(o);
-                    }}
-                    className={`flex-1 py-2 rounded-xl text-[10px] font-black transition-all border ${
-                      octaveShift === o ? 'bg-purple-600 border-purple-500 text-white' : 'bg-white/5 border-white/5 text-white/40'
-                    }`}
-                  >
-                    {o > 0 ? `+${o}` : o}
-                  </button>
-                ))}
+              {/* Octave */}
+              <div className="space-y-3">
+                <label className="text-[8px] font-black uppercase text-white/40">Octave Shift</label>
+                <div className="flex gap-2">
+                  {[-2, -1, 0, 1, 2].map(o => (
+                    <button key={o} onClick={() => { setOctaveShift(o); audioEngineRef.current?.setOctaveShift(o); }}
+                      className={`flex-1 py-2 rounded-xl text-[10px] border ${octaveShift === o ? 'bg-purple-600 border-purple-500' : 'bg-white/5 border-white/5'}`}>
+                      {o > 0 ? `+${o}` : o}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Autotune */}
+              <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl">
+                <span className="text-[10px] font-black uppercase">Auto-Tune</span>
+                <button onClick={() => { setAutotune(!autotune); audioEngineRef.current?.setAutotune(!autotune); }}
+                  className={`w-10 h-5 rounded-full relative transition-colors ${autotune ? 'bg-purple-600' : 'bg-zinc-800'}`}>
+                  <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all ${autotune ? 'right-1' : 'left-1'}`} />
+                </button>
               </div>
             </div>
 
-            {/* Toggle Autotune */}
-            <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
-              <div className="flex items-center gap-3">
-                <Zap className={`w-4 h-4 ${autotune ? 'text-purple-400' : 'text-white/20'}`} />
-                <span className="text-[10px] font-black uppercase tracking-widest">Auto-Tune</span>
-              </div>
-              <button 
-                onClick={() => {
-                  const newVal = !autotune;
-                  setAutotune(newVal);
-                  audioEngineRef.current?.setAutotune(newVal);
-                }}
-                className={`w-10 h-5 rounded-full transition-all relative ${autotune ? 'bg-purple-600' : 'bg-zinc-800'}`}
-              >
-                <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all ${autotune ? 'right-1' : 'left-1'}`} />
-              </button>
-            </div>
-
-            {/* Selezione Scala */}
-            <div className="space-y-3">
-              <label className="text-[8px] font-black uppercase tracking-widest text-white/40">Musical Scale</label>
-              <select 
-                value={selectedScaleIdx}
-                onChange={(e) => {
-                  const idx = parseInt(e.target.value);
-                  setSelectedScaleIdx(idx);
-                  audioEngineRef.current?.setScale(SCALES[idx].intervals);
-                }}
-                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-black uppercase tracking-widest text-white/60 focus:outline-none focus:border-purple-500"
-              >
-                {SCALES.map((s, i) => <option key={i} value={i} className="bg-[#050507]">{s.name}</option>)}
-              </select>
-            </div>
-
-            {/* Bottoni Azione */}
             <div className="pt-4 space-y-3">
               {appState === 'idle' ? (
                 <div className="flex gap-3">
-                  <button onClick={handleStartLive} className="flex-1 flex items-center justify-center gap-2 py-4 bg-white text-black rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-500 hover:text-white transition-all">
-                    <Volume2 className="w-4 h-4" /> Live
-                  </button>
-                  <button onClick={handleStartRecording} className="flex-1 flex items-center justify-center gap-2 py-4 bg-purple-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-500 transition-all">
-                    <Mic className="w-4 h-4" /> Record
-                  </button>
+                  <button onClick={handleStartLive} className="flex-1 py-4 bg-white text-black rounded-2xl font-black uppercase text-[10px]">Live</button>
+                  <button onClick={handleStartRecording} className="flex-1 py-4 bg-purple-600 text-white rounded-2xl font-black uppercase text-[10px]">Record</button>
                 </div>
               ) : (
-                <button onClick={handleStop} className="w-full flex items-center justify-center gap-2 py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest animate-pulse">
-                  <Square className="w-4 h-4" /> Stop
-                </button>
+                <button onClick={handleStop} className="w-full py-4 bg-red-600 text-white rounded-2xl font-black uppercase text-[10px] animate-pulse">Stop</button>
               )}
             </div>
           </div>
         </div>
 
-        <InstrumentGrid 
-          selectedId={selectedInstrument} 
-          onSelect={handleInstrumentSelect}
-          isLoading={loadingInstrumentId !== null}
-        />
+        <InstrumentGrid selectedId={selectedInstrument} onSelect={handleInstrumentSelect} isLoading={loadingInstrumentId !== null} />
       </main>
-
-      <footer className="py-12 px-8 border-t border-white/5 text-center opacity-20">
-        <p className="text-[10px] font-black uppercase tracking-[0.5em]">VocalSynth Pro © 2025</p>
-      </footer>
     </div>
   );
 };
